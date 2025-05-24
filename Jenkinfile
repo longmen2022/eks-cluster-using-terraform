@@ -1,0 +1,76 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = 'us-east-1'
+        AWS_ACCESS_KEY_ID = credentials('AWS_Access_Key')  // Injects stored Jenkins credentials
+        AWS_SECRET_ACCESS_KEY = credentials('AWS_Secret_Key')  // Injects stored Jenkins credentials
+    }
+
+    parameters {
+        choice(name: 'ACTION', choices: ['apply', 'destroy'], description: 'Choose to apply or destroy infrastructure')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/longmen2022/eks-cluster-using-terraform.git'
+            }
+        }
+
+        stage('Initialize Terraform') {
+            steps {
+                withEnv([
+                    "AWS_ACCESS_KEY_ID=${credentials('AWS_Access_Key')}",
+                    "AWS_SECRET_ACCESS_KEY=${credentials('AWS_Secret_Key')}"
+                ]) {
+                    sh 'terraform init'
+                }
+            }
+        }
+
+        stage('Plan Terraform') {
+            steps {
+                withEnv([
+                    "AWS_ACCESS_KEY_ID=${credentials('AWS_Access_Key')}",
+                    "AWS_SECRET_ACCESS_KEY=${credentials('AWS_Secret_Key')}"
+                ]) {
+                    sh 'terraform plan -out=tfplan'
+                }
+            }
+        }
+
+        stage('Apply or Destroy') {
+            steps {
+                script {
+                    if (params.ACTION == 'destroy') {
+                        input message: "**WARNING:** This will delete all AWS resources. Click 'Destroy' to proceed or 'Abort' to cancel.", ok: "Destroy"
+
+                        withEnv([
+                            "AWS_ACCESS_KEY_ID=${credentials('AWS_Access_Key')}",
+                            "AWS_SECRET_ACCESS_KEY=${credentials('AWS_Secret_Key')}"
+                        ]) {
+                            sh 'terraform destroy -auto-approve'
+                        }
+                    } else {
+                        withEnv([
+                            "AWS_ACCESS_KEY_ID=${credentials('AWS_Access_Key')}",
+                            "AWS_SECRET_ACCESS_KEY=${credentials('AWS_Secret_Key')}"
+                        ]) {
+                            sh 'terraform apply -auto-approve tfplan'
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo "Pipeline execution failed. Check Terraform logs for errors."
+        }
+        success {
+            echo "Terraform execution completed successfully."
+        }
+    }
+}
